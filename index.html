@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Camera đóng hàng</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0a7d4f">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
 :root{--bg:#f6f7f9;--card:#fff;--tx:#14171c;--mu:#6b7280;--ac:#0a7d4f;--rd:#d92d20;--bd:#e3e6ea;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1013;--card:#181b20;--tx:#eef0f3;--mu:#98a0ab;--ac:#2fbf82;--rd:#f97066;--bd:#2a2e35}}
@@ -31,9 +35,17 @@ button:disabled{opacity:.5}
 .item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-top:1px solid var(--bd)}
 .item:first-child{border-top:0}
 .item b{word-break:break-all;font-size:14px}
+#login{position:fixed;inset:0;z-index:10;background:var(--bg);display:none;align-items:center;justify-content:center;padding:24px;text-align:center}
+#login.on{display:flex}.lbox{max-width:360px;width:100%}
+select{flex:1;min-width:0;padding:12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font-size:16px}
+.chk{display:flex;align-items:center;gap:8px;margin-top:8px}
+.chk input{flex:none;width:auto;padding:0}
+.ok{color:var(--ac)}.err{color:var(--rd)}
+.btns{display:flex;gap:6px;flex:none}
 </style>
 </head>
 <body>
+<div id="login"><div class="lbox"><div style="font-size:48px">📦</div><h1>Camera đóng hàng</h1><p class="mu">Đăng nhập Google để video đóng hàng được tự động lưu vào Drive của bạn.</p><button class="big" id="lgo">Đăng nhập bằng Google</button><div class="mu err" id="lerr"></div><button class="ghost big" id="lskip">Dùng không cần Drive</button></div></div>
 <main>
 <h1>📦 Camera đóng hàng</h1>
 <div class="cam"><video id="v" playsinline muted></video><canvas id="pv"></canvas><div class="guide"></div><div class="badge" id="badge">Chưa bật camera</div></div>
@@ -48,20 +60,216 @@ button:disabled{opacity:.5}
   <div class="mu">Nhập tay hoặc dùng máy quét mã vạch (Bluetooth/USB)</div>
   <div class="row"><input id="man" placeholder="Mã đơn hàng" autocomplete="off" autocapitalize="characters"><button id="go">Quay</button></div>
 </div>
+<div class="card">
+  <div class="mu">Chất lượng video</div>
+  <div class="row"><select id="qual"><option value="480">480p – nhẹ (~8 MB/phút)</option><option value="720">720p – cân bằng (~19 MB/phút)</option><option value="1080">1080p – nét (~38 MB/phút)</option></select></div>
+  <div class="mu" style="margin-top:10px">Mã quét để dừng quay</div>
+  <div class="row"><input id="stopc" autocomplete="off" autocapitalize="characters"></div>
+</div>
+<div class="card">
+  <div class="mu">Telegram (gửi video vào nhóm hoặc kênh riêng)</div>
+  <div class="row"><input id="tgtok" type="password" placeholder="Bot token (lấy từ @BotFather)" autocomplete="off"></div>
+  <div class="row"><input id="tgchat" placeholder="Chat ID (ví dụ -1001234567890)" autocomplete="off"></div>
+  <div class="row"><button id="tgfind" class="ghost" style="flex:1">Tìm Chat ID</button><button id="tgtest" class="ghost" style="flex:1">Gửi tin thử</button></div>
+  <label class="chk mu"><input type="checkbox" id="tgon"> Gửi video lên Telegram sau khi quay</label>
+  <div class="mu" id="tgst" style="margin-top:6px">Chưa bật Telegram</div>
+</div>
+<div class="card">
+  <div class="mu">Google Drive</div>
+  <div class="row"><button id="gcon" style="flex:1">Đăng nhập Google</button><button id="gout" class="ghost">Đăng xuất</button></div>
+  <div class="row"><input id="fold" placeholder="Tên thư mục trên Drive" autocomplete="off"></div>
+  <label class="chk mu"><input type="checkbox" id="auto" checked> Tự động đẩy lên Drive sau khi quay</label>
+  <label class="chk mu"><input type="checkbox" id="loc" checked> Cũng tải về máy</label>
+  <label class="chk mu"><input type="checkbox" id="purge" checked> Tự chuyển video quá 60 ngày vào thùng rác Drive</label>
+  <div class="mu" id="gst" style="margin-top:6px">Chưa kết nối Drive</div>
+</div>
+<div class="card"><div class="mu">Tìm video theo mã đơn</div><div class="row"><input id="q" placeholder="Nhập mã đơn…" autocomplete="off" autocapitalize="characters"></div><div id="sres"></div></div>
 <div class="card"><div class="mu" style="margin-bottom:4px">Video đã quay (phiên này)</div><div id="list"><div class="mu">Chưa có video.</div></div></div>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let rc,rctx,cstream,stream,rec,chunks=[],cur=null,t0=0,timer,lastSeen='',lastAt=0,detector,zx,items=[];
+let rc,rctx,cstream,stream,rec,chunks=[],cur=null,t0=0,timer,lastSeen='',lastAt=0,detector,zx,items=[],part=1,ot0=0;
 const mime=['video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m))||'';
 const ext=mime.startsWith('video/mp4')?'mp4':'webm';
+// DÁN Client ID (loại Web application) của bạn vào đây:
+const GOOGLE_CLIENT_ID='1072819237340-25ra3gk7jq2gdhtg80mr8iup14qu3l8n.apps.googleusercontent.com';
+const MAX_MS=10*60*1000; // tự dừng khi tổng thời gian một đơn quá 10 phút
+const TG_MAX=45*1048576; // bot Telegram nhận tối đa ~50 MB/file, quá mức này app tự chia phần
+let blockCode='',gtok='',gexp=0,queue=[],qrun=false;
+const LS={get:k=>{try{return localStorage.getItem(k)||''}catch(e){return ''}},set:(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}}};
+
+/* ---------- Google Drive ---------- */
+function loadGis(){
+  if(window.google&&google.accounts&&google.accounts.oauth2)return Promise.resolve();
+  return new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://accounts.google.com/gsi/client';s.onload=ok;s.onerror=()=>no(new Error('Không tải được Google Sign-In'));document.head.appendChild(s)});
+}
+async function token(interactive){
+  if(gtok&&Date.now()<gexp-60000)return gtok;
+  const id=GOOGLE_CLIENT_ID;if(!id||id.startsWith('DÁN'))throw new Error('Chưa cấu hình Client ID trong code');
+  await loadGis();
+  return new Promise((ok,no)=>{
+    const c=google.accounts.oauth2.initTokenClient({
+      client_id:id,scope:'https://www.googleapis.com/auth/drive.file',
+      callback:r=>{if(r.error)return no(new Error(r.error));gtok=r.access_token;gexp=Date.now()+(r.expires_in||3600)*1000;ok(gtok)},
+      error_callback:e=>no(new Error(e.type==='popup_closed'?'Đã đóng cửa sổ đăng nhập':'Cần kết nối lại Drive'))
+    });
+    c.requestAccessToken({prompt:interactive?'':'none'});
+  });
+}
+async function getFolder(t){
+  const name=$('fold').value.trim()||'Video đóng hàng';
+  if(LS.get('gf_name')===name&&LS.get('gf_id'))return LS.get('gf_id');
+  const H={Authorization:'Bearer '+t};
+  const q=encodeURIComponent("mimeType='application/vnd.google-apps.folder' and trashed=false and name='"+name.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"'");
+  let r=await(await fetch('https://www.googleapis.com/drive/v3/files?fields=files(id)&q='+q,{headers:H})).json();
+  let id=r.files&&r.files[0]&&r.files[0].id;
+  if(!id){
+    r=await(await fetch('https://www.googleapis.com/drive/v3/files?fields=id',{method:'POST',headers:{...H,'Content-Type':'application/json'},body:JSON.stringify({name,mimeType:'application/vnd.google-apps.folder'})})).json();
+    id=r.id;
+  }
+  if(!id)throw new Error((r.error&&r.error.message)||'Không tạo được thư mục');
+  LS.set('gf_name',name);LS.set('gf_id',id);return id;
+}
+async function uploadDrive(it){
+  it.drive='uploading';it.pct=0;it.err='';render();
+  try{
+    const t=await token(!!it.inter);it.inter=false;
+    const fid=await getFolder(t);
+    const type=it.blob.type||'video/webm';
+    const init=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,webViewLink',{method:'POST',headers:{Authorization:'Bearer '+t,'Content-Type':'application/json; charset=UTF-8','X-Upload-Content-Type':type},body:JSON.stringify({name:it.name,parents:[fid]})});
+    if(!init.ok){if(init.status===404)LS.set('gf_id','');throw new Error('Drive từ chối ('+init.status+')')}
+    const loc=init.headers.get('Location');if(!loc)throw new Error('Không có link upload');
+    await new Promise((ok,no)=>{
+      const x=new XMLHttpRequest();x.open('PUT',loc);x.setRequestHeader('Content-Type',type);
+      x.upload.onprogress=e=>{if(e.lengthComputable){it.pct=Math.round(e.loaded/e.total*100);render()}};
+      x.onload=()=>{if(x.status<300){try{const j=JSON.parse(x.responseText);it.link=j.webViewLink;it.fid=j.id}catch(e){}ok()}else no(new Error('HTTP '+x.status))};
+      x.onerror=()=>no(new Error('mất mạng'));x.send(it.blob);
+    });
+    it.drive='done';if(it.fid)addHist({id:it.fid,name:it.name,code:it.code,ts:Date.now(),link:it.link});finishUp(it);
+  }catch(e){it.drive='error';it.err=e.message||'lỗi';it.next=Date.now()+60000}
+  render();
+}
+const driveOn=()=>$('auto').checked&&LS.get('g_logged')==='1';
+const tgOn=()=>LS.get('g_tg')==='1'&&!!LS.get('g_tgtok')&&!!LS.get('g_tgchat');
+// Chỉ xóa bản tạm trong máy khi mọi nơi lưu đang bật đều đã nhận xong
+function finishUp(it){
+  if((!driveOn()||it.drive==='done')&&(!tgOn()||it.tg==='done')){it.inDb=false;dbDel(it.name)}
+  else dbPut(it);
+}
+async function uploadTg(it){
+  it.tg='uploading';it.terr='';render();
+  try{
+    if(it.blob.size>49*1048576)throw new Error('file lớn hơn 49 MB, bot Telegram không nhận');
+    const fd=new FormData();fd.append('chat_id',LS.get('g_tgchat'));
+    fd.append('caption','📦 '+it.code+' · '+new Date(it.ts||Date.now()).toLocaleString('vi-VN'));
+    fd.append('document',it.blob,it.name);
+    const r=await(await fetch('https://api.telegram.org/bot'+LS.get('g_tgtok')+'/sendDocument',{method:'POST',body:fd})).json();
+    if(!r.ok)throw new Error(r.description||'Telegram từ chối');
+    it.tg='done';
+    const ch=String(LS.get('g_tgchat'));
+    if(r.result&&r.result.message_id&&ch.startsWith('-100'))it.tlink='https://t.me/c/'+ch.slice(4)+'/'+r.result.message_id;
+    if(!driveOn())addHist({id:'tg-'+it.name,name:it.name,code:it.code,ts:Date.now(),link:it.tlink||''});
+    finishUp(it);
+  }catch(e){it.tg='error';it.terr=(e&&e.message)||'lỗi';it.next=Date.now()+60000}
+  render();
+}
+async function upload(it){
+  if(tgOn()&&it.tg!=='done')await uploadTg(it);
+  if((driveOn()||it.inter)&&it.drive!=='done')await uploadDrive(it);
+}
+function enqueue(it){queue.push(it);if(!qrun)runQueue()}
+async function runQueue(){qrun=true;while(queue.length)await upload(queue.shift());qrun=false}
+function setGst(msg,cls){const g=$('gst');g.textContent=msg;g.className='mu '+(cls||'')}
+
+/* ---------- Lịch sử & tìm kiếm ---------- */
+const hist=()=>{try{return JSON.parse(LS.get('hist')||'[]')}catch(e){return []}};
+const addHist=h=>{const a=hist().filter(x=>x.id!==h.id);a.unshift(h);LS.set('hist',JSON.stringify(a.slice(0,2000)))};
+let sT;
+function showRes(rows){
+  const b=$('sres');b.innerHTML='';
+  if(!rows.length){b.innerHTML='<div class="mu" style="margin-top:8px">Không thấy video nào khớp.</div>';return}
+  rows.slice(0,30).forEach(h=>{
+    const r=document.createElement('div');r.className='item';
+    const a=document.createElement('div');const n=document.createElement('b');n.textContent=h.name;
+    const m=document.createElement('div');m.className='mu';m.textContent=h.ts?new Date(h.ts).toLocaleString('vi-VN'):'';
+    a.append(n,m);r.append(a);
+    if(h.link){const o=document.createElement('button');o.className='ghost';o.textContent='Mở';o.onclick=()=>window.open(h.link,'_blank');r.append(o)}
+    b.appendChild(r);
+  });
+}
+async function search(){
+  const k=$('q').value.trim();
+  if(!k){$('sres').innerHTML='';return}
+  const lk=k.toLowerCase();
+  const rows=hist().filter(h=>h.name.toLowerCase().includes(lk));
+  showRes(rows);
+  if(gtok&&Date.now()<gexp-60000){
+    try{
+      const q="trashed=false and mimeType contains 'video/' and name contains '"+k.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"'";
+      const r=await(await fetch('https://www.googleapis.com/drive/v3/files?pageSize=50&orderBy=createdTime%20desc&fields=files(id,name,createdTime,webViewLink)&q='+encodeURIComponent(q),{headers:{Authorization:'Bearer '+gtok}})).json();
+      if($('q').value.trim()!==k)return;
+      (r.files||[]).forEach(f=>{if(!rows.some(x=>x.id===f.id))rows.push({id:f.id,name:f.name,ts:Date.parse(f.createdTime),link:f.webViewLink})});
+      rows.sort((a,b)=>(b.ts||0)-(a.ts||0));showRes(rows);
+    }catch(e){}
+  }
+}
+
+/* ---------- Lưu tạm trên máy (IndexedDB) ---------- */
+const DB=new Promise(ok=>{try{const r=indexedDB.open('packcam',1);r.onupgradeneeded=()=>r.result.createObjectStore('vids',{keyPath:'name'});r.onsuccess=()=>ok(r.result);r.onerror=()=>ok(null)}catch(e){ok(null)}});
+const dbOp=async(mode,fn)=>{const d=await DB;if(!d)return null;return new Promise(ok=>{try{const t=d.transaction('vids',mode),r=fn(t.objectStore('vids'));t.oncomplete=()=>ok(r&&r.result!==undefined?r.result:true);t.onerror=t.onabort=()=>ok(null)}catch(e){ok(null)}})};
+const dbPut=it=>dbOp('readwrite',s=>s.put({name:it.name,code:it.code,blob:it.blob,ts:it.ts,dDone:it.drive==='done',tDone:it.tg==='done'}));
+const dbDel=n=>dbOp('readwrite',s=>s.delete(n));
+const dbAll=()=>dbOp('readonly',s=>s.getAll());
+
+/* ---------- Tự thử lại upload ---------- */
+let tokTry=0;
+async function retry(){
+  if(qrun||!navigator.onLine)return;
+  const dOn=driveOn(),tOn=tgOn();
+  if(!dOn&&!tOn)return;
+  const need=i=>(dOn&&i.drive!=='done')||(tOn&&i.tg!=='done');
+  const list=items.filter(i=>i.inDb&&i.drive!=='uploading'&&i.tg!=='uploading'&&!queue.includes(i)&&need(i)&&(!i.next||Date.now()>i.next));
+  if(!list.length)return;
+  if(dOn&&list.some(i=>i.drive!=='done')&&!(gtok&&Date.now()<gexp-60000)&&Date.now()>=tokTry+300000){
+    tokTry=Date.now();
+    try{await token(false)}catch(e){setGst('Cần đăng nhập lại: bấm "Đăng nhập Google"','err')}
+  }
+  list.forEach(enqueue);
+}
+setInterval(retry,30000);addEventListener('online',retry);
+
+/* ---------- Tự chuyển video cũ vào thùng rác Drive ---------- */
+const KEEP_DAYS=60;
+async function purgeOld(){
+  if(LS.get('g_purge')==='0'||!(gtok&&Date.now()<gexp-60000))return;
+  if(Date.now()-(+LS.get('g_purge_at')||0)<72e6)return;
+  const cut=Date.now()-KEEP_DAYS*864e5,H={Authorization:'Bearer '+gtok},fid=LS.get('gf_id');
+  try{
+    const q="trashed=false and mimeType contains 'video/' and createdTime < '"+new Date(cut).toISOString()+"'"+(fid?" and '"+fid+"' in parents":'');
+    const r=await(await fetch('https://www.googleapis.com/drive/v3/files?pageSize=100&fields=files(id)&q='+encodeURIComponent(q),{headers:H})).json();
+    if(r.error)return;
+    let n=0;
+    for(const f of r.files||[]){const x=await fetch('https://www.googleapis.com/drive/v3/files/'+f.id,{method:'PATCH',headers:{...H,'Content-Type':'application/json'},body:JSON.stringify({trashed:true})});if(x.ok)n++}
+    LS.set('hist',JSON.stringify(hist().filter(h=>(h.ts||0)>=cut)));LS.set('g_purge_at',String(Date.now()));
+    if(n)setGst('Đã chuyển '+n+' video quá '+KEEP_DAYS+' ngày vào thùng rác Drive','ok');
+  }catch(e){}
+}
+
+/* ---------- Âm báo, trùng mã, chất lượng ---------- */
+let ac;
+function beep(f,ms){try{if(!ac)return;if(ac.state==='suspended')ac.resume();const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=f;g.gain.value=.15;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+ms/1000)}catch(e){}}
+const dupCheck=c=>items.some(i=>i.code===c)||hist().some(h=>h.code===c);
+const QS={'480':{w:854,h:480,b:1000000},'720':{w:1280,h:720,b:2500000},'1080':{w:1920,h:1080,b:5000000}};
+const Q=()=>QS[LS.get('g_q')]||QS['480'];
+
 const pad=n=>String(n).padStart(2,'0');
 const safe=s=>s.replace(/[\\\/:*?"<>|\s]+/g,'_').slice(0,80);
 const stamp=()=>{const d=new Date();return d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds())};
 
 async function startCam(){
+  try{ac=ac||new (window.AudioContext||window.webkitAudioContext)()}catch(e){}
   try{
-    try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:true})}
+    try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:Q().w},height:{ideal:Q().h}},audio:true})}
     catch(e){stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false})}
     $('v').srcObject=stream;await $('v').play();
     initCanvas();
@@ -92,7 +300,10 @@ async function loop(){
   setTimeout(loop,250);
 }
 function onCode(c){
-  c=c.trim();if(!c||c===cur)return;
+  c=c.trim();if(!c||c===cur||c===blockCode)return;
+  if(c.toUpperCase()===($('stopc').value||'KETTHUC').toUpperCase()){if(rec){beep(660,150);stopRec()}return}
+  if(dupCheck(c)&&!confirm('Mã đơn '+c+' đã có video. Quay thêm một video nữa?')){blockCode=c;beep(300,300);return}
+  blockCode='';
   if(rec)stopRec();
   startRec(c);
 }
@@ -114,18 +325,20 @@ function initCanvas(){
     rctx.fillStyle='#fff';rctx.fillText(txt,m+fs/2,rc.height-h/2-m);
   },33);
 }
-function startRec(c){
+function startRec(c,p){
   if(!stream||!window.MediaRecorder){$('hint').textContent='Trình duyệt này không hỗ trợ quay video.';return}
-  cur=c;chunks=[];
-  rec=new MediaRecorder(cstream||stream,mime?{mimeType:mime,videoBitsPerSecond:2500000}:{videoBitsPerSecond:2500000});
-  rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
-  const code=c,parts=chunks;
-  rec.onstop=()=>finish(code,new Blob(parts,{type:mime||'video/webm'}));
-  rec.start(1000);t0=Date.now();
+  cur=c;part=p||1;const parts=[],code=c,pn=part;let sz=0,cut=false;
+  const vb=Q().b;const me=rec=new MediaRecorder(cstream||stream,mime?{mimeType:mime,videoBitsPerSecond:vb}:{videoBitsPerSecond:vb});
+  me.ondataavailable=e=>{if(!e.data.size)return;parts.push(e.data);sz+=e.data.size;
+    if(tgOn()&&!cut&&sz>=TG_MAX&&rec===me){cut=true;setTimeout(()=>{if(rec===me){stopRec();startRec(code,pn+1)}},0)}};
+  me.onstop=()=>finish(code,new Blob(parts,{type:mime||'video/webm'}),pn);
+  me.start(1000);t0=Date.now();if(pn===1)ot0=t0;
   $('code').textContent=c;$('stop').disabled=false;$('badge').className='badge rec';
   $('hint').textContent='Đang quay. Quét mã đơn khác hoặc bấm Dừng để kết thúc.';
-  clearInterval(timer);timer=setInterval(()=>{const s=Math.floor((Date.now()-t0)/1000);$('badge').textContent='● REC '+pad(Math.floor(s/60))+':'+pad(s%60)},500);
-  if(navigator.vibrate)navigator.vibrate(80);
+  clearInterval(timer);timer=setInterval(()=>{
+    if(Date.now()-ot0>=MAX_MS){blockCode=cur;stopRec();$('hint').textContent='Đã tự dừng vì đủ 10 phút. Video đã được lưu. Quét mã đơn khác để quay tiếp.';return}
+    const s=Math.floor((Date.now()-ot0)/1000);$('badge').textContent='● REC '+pad(Math.floor(s/60))+':'+pad(s%60)},500);
+  if(navigator.vibrate)navigator.vibrate(80);beep(880,120);
 }
 function stopRec(){
   if(!rec)return;clearInterval(timer);
@@ -133,10 +346,12 @@ function stopRec(){
   rec=null;cur=null;$('stop').disabled=true;$('badge').className='badge';$('badge').textContent='Sẵn sàng quét';
   $('hint').textContent='Đã dừng. Đưa mã đơn tiếp theo vào khung.';
 }
-function finish(code,blob){
+function finish(code,blob,pn){
   if(!blob.size)return;
-  const it={name:safe(code)+'_'+stamp()+'.'+ext,blob,saved:false};
-  items.unshift(it);render();save(it);
+  const it={name:safe(code)+(pn>1?'_p'+pn:'')+'_'+stamp()+'.'+ext,blob,saved:false,code,ts:Date.now()};
+  items.unshift(it);render();dbPut(it).then(ok=>{if(ok)it.inDb=true});
+  if($('loc').checked)save(it);
+  if(driveOn()||tgOn())enqueue(it);
 }
 async function save(it){
   let d=null;try{d=await claude.use('downloads')}catch(e){}
@@ -151,14 +366,85 @@ function render(){
     const r=document.createElement('div');r.className='item';
     const a=document.createElement('div');const b=document.createElement('b');b.textContent=it.name;
     const m=document.createElement('div');m.className='mu';m.textContent=(it.blob.size/1048576).toFixed(1)+' MB · '+(it.note||'');
-    a.append(b,m);
+    const d=document.createElement('div');d.className='mu';
+    if(it.drive==='uploading'){d.textContent='Drive: đang đẩy '+(it.pct||0)+'%'}
+    else if(it.drive==='done'){d.className='mu ok';d.textContent='Drive: đã lên ✓'}
+    else if(it.drive==='error'){d.className='mu err';d.textContent='Drive lỗi: '+it.err+' (sẽ tự thử lại)'}
+    else if(it.inDb&&driveOn()){d.textContent='Đã lưu trên máy, chờ đẩy lên Drive'}
+    const t2=document.createElement('div');t2.className='mu';
+    if(it.tg==='uploading')t2.textContent='Telegram: đang gửi…';
+    else if(it.tg==='done'){t2.className='mu ok';t2.textContent='Telegram: đã gửi ✓'}
+    else if(it.tg==='error'){t2.className='mu err';t2.textContent='Telegram lỗi: '+it.terr+' (sẽ tự thử lại)'}
+    else if(it.inDb&&tgOn())t2.textContent='Telegram: chờ gửi';
+    a.append(b,m);if(d.textContent)a.append(d);if(t2.textContent)a.append(t2);
     const bt=document.createElement('button');bt.className='ghost';bt.textContent=it.saved?'Lưu lại':'Lưu';bt.onclick=()=>save(it);
-    r.append(a,bt);l.appendChild(r);
+    const bs=document.createElement('div');bs.className='btns';bs.append(bt);
+    if(it.drive!=='done'&&it.drive!=='uploading'){
+      const dr=document.createElement('button');dr.className='ghost';dr.textContent=it.drive==='error'?'Thử lại':'Lên Drive';
+      dr.onclick=()=>{it.inter=true;enqueue(it)};bs.append(dr);
+    }
+    if(tgOn()&&it.tg!=='done'&&it.tg!=='uploading'){const tb=document.createElement('button');tb.className='ghost';tb.textContent='Gửi Telegram';tb.onclick=()=>{it.next=0;enqueue(it)};bs.append(tb)}
+    if(it.tlink){const tl=document.createElement('button');tl.className='ghost';tl.textContent='Mở TG';tl.onclick=()=>window.open(it.tlink,'_blank');bs.append(tl)}
+    if(it.link){const ln=document.createElement('button');ln.className='ghost';ln.textContent='Mở';ln.onclick=()=>window.open(it.link,'_blank');bs.append(ln)}
+    r.append(a,bs);l.appendChild(r);
   });
 }
+$('fold').value=LS.get('g_fold')||'Video đóng hàng';
+$('auto').checked=LS.get('g_auto')!=='0';$('loc').checked=LS.get('g_loc')!=='0';
+$('fold').onchange=()=>{LS.set('g_fold',$('fold').value.trim());LS.set('gf_id','')};
+$('auto').onchange=()=>LS.set('g_auto',$('auto').checked?'1':'0');
+$('loc').onchange=()=>LS.set('g_loc',$('loc').checked?'1':'0');
+async function signIn(){
+  setGst('Đang đăng nhập…');$('lerr').textContent='';
+  try{await token(true);LS.set('g_logged','1');$('login').classList.remove('on');setGst('Đã kết nối Drive ✓','ok');retry();purgeOld()}
+  catch(e){setGst('Không đăng nhập được: '+e.message,'err');$('lerr').textContent='Không đăng nhập được: '+e.message}
+}
+$('gcon').onclick=signIn;$('lgo').onclick=signIn;
+$('lskip').onclick=()=>{LS.set('g_logged','skip');$('login').classList.remove('on');setGst('Chưa kết nối Drive')};
+$('gout').onclick=()=>{try{if(gtok)google.accounts.oauth2.revoke(gtok)}catch(e){}gtok='';gexp=0;LS.set('g_logged','');LS.set('gf_id','');setGst('Chưa kết nối Drive');$('login').classList.add('on')};
+$('purge').checked=LS.get('g_purge')!=='0';$('purge').onchange=()=>LS.set('g_purge',$('purge').checked?'1':'0');
+$('qual').value=LS.get('g_q')||'480';
+$('qual').onchange=()=>{LS.set('g_q',$('qual').value);if(stream&&!rec){const t=stream.getVideoTracks()[0];if(t)t.applyConstraints({width:{ideal:Q().w},height:{ideal:Q().h}}).catch(()=>{})}};
+$('stopc').value=LS.get('g_stop')||'KETTHUC';
+$('stopc').onchange=()=>{$('stopc').value=$('stopc').value.trim().toUpperCase()||'KETTHUC';LS.set('g_stop',$('stopc').value)};
+dbAll().then(rows=>{(rows||[]).forEach(r=>{if(!items.some(i=>i.name===r.name))items.push({name:r.name,code:r.code,blob:r.blob,ts:r.ts,saved:false,inDb:true,drive:r.dDone?'done':undefined,tg:r.tDone?'done':undefined,note:'Khôi phục sau khi mở lại'})});items.sort((a,b)=>(b.ts||0)-(a.ts||0));render()});
+$('q').oninput=()=>{clearTimeout(sT);sT=setTimeout(search,300)};
+function setTgSt(m,c){const g=$('tgst');g.textContent=m;g.className='mu '+(c||'')}
+$('tgtok').value=LS.get('g_tgtok');$('tgchat').value=LS.get('g_tgchat');$('tgon').checked=LS.get('g_tg')==='1';
+const tgSave=()=>{LS.set('g_tgtok',$('tgtok').value.trim());LS.set('g_tgchat',$('tgchat').value.trim());LS.set('g_tg',$('tgon').checked?'1':'0')};
+const tgInfo=()=>setTgSt(tgOn()?'Đã bật: video được gửi vào Telegram sau khi quay (mỗi file tối đa ~45 MB, dài hơn sẽ tự chia phần _p2, _p3).':'Chưa bật Telegram','');
+$('tgtok').onchange=$('tgchat').onchange=()=>{tgSave();tgInfo()};
+$('tgon').onchange=()=>{tgSave();tgInfo();retry()};
+$('tgfind').onclick=async()=>{
+  tgSave();const t=LS.get('g_tgtok');if(!t){setTgSt('Hãy dán Bot token trước','err');return}
+  setTgSt('Đang tìm…');
+  try{
+    const r=await(await fetch('https://api.telegram.org/bot'+t+'/getUpdates')).json();
+    if(!r.ok)throw new Error(r.description||'lỗi');
+    const m=new Map();
+    (r.result||[]).forEach(u=>{const c=(u.message||u.channel_post||u.my_chat_member||{}).chat;if(c&&c.type!=='private')m.set(c.id,c.title||String(c.id))});
+    if(!m.size)throw new Error('chưa thấy nhóm/kênh nào. Hãy thêm bot vào nhóm, gửi 1 tin nhắn trong nhóm rồi bấm lại');
+    const [id,title]=[...m][0];$('tgchat').value=id;tgSave();
+    setTgSt('Đã điền Chat ID của "'+title+'"'+(m.size>1?' (còn '+(m.size-1)+' nhóm khác, hãy kiểm tra lại)':''),'ok');
+  }catch(e){setTgSt('Không tìm được: '+e.message,'err')}
+};
+$('tgtest').onclick=async()=>{
+  tgSave();const t=LS.get('g_tgtok'),c=LS.get('g_tgchat');
+  if(!t||!c){setTgSt('Cần nhập Bot token và Chat ID','err');return}
+  setTgSt('Đang gửi tin thử…');
+  try{
+    const r=await(await fetch('https://api.telegram.org/bot'+t+'/sendMessage',{method:'POST',body:new URLSearchParams({chat_id:c,text:'✅ Camera đóng hàng đã kết nối Telegram'})})).json();
+    if(!r.ok)throw new Error(r.description||'Telegram từ chối');
+    setTgSt('Gửi thử thành công ✓ Hãy tick ô bên trên để tự gửi video.','ok');
+  }catch(e){setTgSt('Gửi thử lỗi: '+(e.message==='Failed to fetch'?'mất mạng hoặc bị chặn truy cập api.telegram.org':e.message),'err')}
+};
+tgInfo();
+if(!LS.get('g_logged'))$('login').classList.add('on');
+else if(LS.get('g_logged')==='1'){tokTry=Date.now();setGst('Đang kết nối lại Drive…');token(false).then(()=>{setGst('Đã kết nối Drive ✓','ok');retry();purgeOld()}).catch(()=>setGst('Cần đăng nhập lại: bấm "Đăng nhập Google"','err'))}
 $('start').onclick=startCam;
+if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
 $('stop').onclick=stopRec;
-const manual=()=>{const v=$('man').value.trim();if(!v)return;if(!stream){$('hint').textContent='Hãy bật camera trước.';return}$('man').value='';onCode(v)};
+const manual=()=>{const v=$('man').value.trim();if(!v)return;if(!stream){$('hint').textContent='Hãy bật camera trước.';return}$('man').value='';blockCode='';onCode(v)};
 $('go').onclick=manual;
 $('man').addEventListener('keydown',e=>{if(e.key==='Enter')manual()});
 </script>
