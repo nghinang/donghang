@@ -1,0 +1,8 @@
+[{
+  "relation": ["delegate_permission/common.handle_all_urls"],
+  "target": {
+    "namespace": "android_app",
+    "package_name": "com.donghang.camera",
+    "sha256_cert_fingerprints": ["E6:1F:5C:53:5D:F8:19:01:85:35:E0:BD:62:7C:7E:B3:B0:F6:45:67:0B:70:96:B9:76:FF:78:76:BA:0D:C0:F8"]
+  }
+}]
