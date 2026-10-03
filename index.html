@@ -100,6 +100,7 @@ select{flex:1;min-width:0;padding:12px;border:1px solid var(--bd);border-radius:
 </div>
 <div class="card"><div class="mu">Tìm video theo mã đơn</div><div class="row"><input id="q" placeholder="Nhập mã đơn…" autocomplete="off" autocapitalize="characters"></div><div id="sres"></div></div>
 <div class="card"><div class="mu" style="margin-bottom:4px">Video đã quay (phiên này)</div><div id="list"><div class="mu">Chưa có video.</div></div></div>
+<div class="mu" style="text-align:center;margin:14px 0">Phiên bản <span id="ver"></span></div>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -107,7 +108,8 @@ let rc,rctx,cstream,stream,rec,chunks=[],cur=null,t0=0,timer,lastSeen='',lastAt=
 const mime=['video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m))||'';
 const ext=mime.startsWith('video/mp4')?'mp4':'webm';
 // DÁN Client ID (loại Web application) của bạn vào đây:
-const GOOGLE_CLIENT_ID='1072819237340-25ra3gk7jq2gdhtg80mr8iup14qu3l8n.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID='DÁN_CLIENT_ID_VÀO_ĐÂY.apps.googleusercontent.com';
+const APP_VER='v3 · giọng đọc của máy';
 const MAX_MS=10*60*1000; // tự dừng khi tổng thời gian một đơn quá 10 phút
 const TG_MAX=45*1048576; // bot Telegram nhận tối đa ~50 MB/file, quá mức này app tự chia phần
 let dupOK='',dupPending=null,alarmT=null,blockCode='',gtok='',gexp=0,queue=[],qrun=false;
@@ -465,6 +467,7 @@ $('spktest').onclick=()=>{
   speak('Đơn một hai ba bốn','1 2 3 4');
   setTimeout(()=>{if(!spkStarted)spkInfo('Máy không phát tiếng. Kiểm tra mục Chuyển văn bản thành giọng nói trong Cài đặt Android và âm lượng đa phương tiện.','err')},2500);
 };
+$('ver').textContent=APP_VER;
 function setRet(on){retMode=on;$('retbtn').classList.toggle('on',on);$('retbtn').textContent='↩ Hàng hoàn: '+(on?'BẬT':'TẮT');document.querySelector('.cam').classList.toggle('ret',on);$('hint').textContent=on?'Chế độ HÀNG HOÀN đang bật: video tiếp theo có tiền tố HOAN_ trong tên file.':'Đã tắt chế độ hàng hoàn.'}
 $('retbtn').onclick=()=>setRet(!retMode);
 function setSaver(on){saver=on;LS.set('g_saver',on?'1':'0');$('svbtn').classList.toggle('on',on);$('svbtn').textContent='🔋 Tiết kiệm pin: '+(on?'BẬT':'TẮT');idleT=Date.now();if(!on)$('saver').classList.remove('on')}
