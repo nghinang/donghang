@@ -44,15 +44,23 @@ select{flex:1;min-width:0;padding:12px;border:1px solid var(--bd);border-radius:
 .chk input{flex:none;width:auto;padding:0}
 .ok{color:var(--ac)}.err{color:var(--rd)}
 .btns{display:flex;gap:6px;flex:none}
+#retbtn,#svbtn{margin-top:8px}
+#retbtn.on{background:#f59e0b;color:#000;border-color:#f59e0b}
+#svbtn.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.cam.ret{box-shadow:0 0 0 4px #f59e0b}.cam.ret .guide{border-color:#f59e0b}
+#saver{position:fixed;inset:0;z-index:15;background:#000;color:#666;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:24px;font-size:24px}
+#saver.on{display:flex}#saver .sub{font-size:14px;margin-top:12px;color:#444}
 </style>
 </head>
 <body>
+<div id="saver"><div id="svtxt">Sẵn sàng quét</div><div class="sub">Chạm vào màn hình để mở lại</div></div>
 <div id="dup"><div class="lbox"><div style="font-size:56px">⚠️</div><h1>ĐƠN TRÙNG MÃ</h1><p class="mu" id="dupmsg"></p><button class="big" id="dupgo">Quay thêm video cho đơn này</button><button class="ghost big" id="dupno">Bỏ qua, không quay</button></div></div>
 <div id="login"><div class="lbox"><div style="font-size:48px">📦</div><h1>Camera đóng hàng</h1><p class="mu">Đăng nhập Google để video đóng hàng được tự động lưu vào Drive của bạn.</p><button class="big" id="lgo">Đăng nhập bằng Google</button><div class="mu err" id="lerr"></div><button class="ghost big" id="lskip">Dùng không cần Drive</button></div></div>
 <main>
 <h1>📦 Camera đóng hàng</h1>
 <div class="cam"><video id="v" playsinline muted></video><canvas id="pv"></canvas><div class="guide"></div><div class="badge" id="badge">Chưa bật camera</div></div>
 <button class="big" id="start">Bật camera</button>
+<div class="row"><button class="ghost" id="retbtn" style="flex:1">↩ Hàng hoàn: TẮT</button><button class="ghost" id="svbtn" style="flex:1">🔋 Tiết kiệm pin: TẮT</button></div>
 <div class="card">
   <div class="mu">Mã đơn hiện tại</div>
   <div class="code" id="code">—</div>
@@ -69,6 +77,7 @@ select{flex:1;min-width:0;padding:12px;border:1px solid var(--bd);border-radius:
   <div class="mu" style="margin-top:10px">Mã quét để dừng quay</div>
   <div class="row"><input id="stopc" autocomplete="off" autocapitalize="characters"></div>
   <label class="chk mu"><input type="checkbox" id="sfxon" checked> Phát âm thanh khi bắt đầu và kết thúc quay</label>
+  <label class="chk mu"><input type="checkbox" id="spk" checked> Đọc to mã đơn khi quét</label>
 </div>
 <div class="card">
   <div class="mu">Telegram (gửi video vào nhóm hoặc kênh riêng)</div>
@@ -92,7 +101,7 @@ select{flex:1;min-width:0;padding:12px;border:1px solid var(--bd);border-radius:
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let rc,rctx,cstream,stream,rec,chunks=[],cur=null,t0=0,timer,lastSeen='',lastAt=0,detector,zx,items=[],part=1,ot0=0;
+let rc,rctx,cstream,stream,rec,chunks=[],cur=null,t0=0,timer,lastSeen='',lastAt=0,detector,zx,items=[],part=1,ot0=0,retMode=false,recRet=false,saver=false,idleT=Date.now(),fr=0;
 const mime=['video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(m=>window.MediaRecorder&&MediaRecorder.isTypeSupported(m))||'';
 const ext=mime.startsWith('video/mp4')?'mp4':'webm';
 // DÁN Client ID (loại Web application) của bạn vào đây:
@@ -165,7 +174,7 @@ async function uploadTg(it){
   try{
     if(it.blob.size>49*1048576)throw new Error('file lớn hơn 49 MB, bot Telegram không nhận');
     const fd=new FormData();fd.append('chat_id',LS.get('g_tgchat'));
-    fd.append('caption','📦 '+it.code+' · '+new Date(it.ts||Date.now()).toLocaleString('vi-VN'));
+    fd.append('caption',(isRet(it.name)?'↩️ HÀNG HOÀN · ':'📦 ')+it.code+' · '+new Date(it.ts||Date.now()).toLocaleString('vi-VN'));
     fd.append('document',it.blob,it.name);
     const r=await(await fetch('https://api.telegram.org/bot'+LS.get('g_tgtok')+'/sendDocument',{method:'POST',body:fd})).json();
     if(!r.ok)throw new Error(r.description||'Telegram từ chối');
@@ -267,6 +276,10 @@ function sfx(kind){
   if(kind==='start'){beep(660,110);setTimeout(()=>beep(990,170),140)}
   else{beep(990,110);setTimeout(()=>beep(660,110),140);setTimeout(()=>beep(440,240),280)}
 }
+function speak(txt){
+  if(LS.get('g_spk')==='0'||!window.speechSynthesis)return;
+  try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(txt);u.lang='vi-VN';u.rate=.9;u.volume=1;speechSynthesis.speak(u)}catch(e){}
+}
 function beep(f,ms,vol,type){try{if(!ac)return;if(ac.state==='suspended')ac.resume();const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=f;if(type)o.type=type;g.gain.value=vol||.15;o.connect(g);g.connect(ac.destination);o.start();o.stop(ac.currentTime+ms/1000)}catch(e){}}
 // Còi báo trùng mã: kêu liên tục + rung cho tới khi bạn chạm nút trên màn hình
 function alarmStart(){
@@ -278,12 +291,13 @@ function alarmStop(){clearInterval(alarmT);alarmT=null;if(navigator.vibrate)navi
 function askDup(c){
   dupPending=c;
   $('dupmsg').textContent='Mã đơn '+c+' đã có video trước đó. Còi sẽ kêu liên tục cho tới khi bạn chạm một nút bên dưới.';
-  $('dup').classList.add('on');alarmStart();
+  $('dup').classList.add('on');alarmStart();wakeSaver();
 }
 function closeDup(){dupPending=null;$('dup').classList.remove('on');alarmStop()}
 $('dupgo').onclick=()=>{const c=dupPending;closeDup();dupOK=c;onCode(c)};
 $('dupno').onclick=()=>{blockCode=dupPending;closeDup()};
-const dupCheck=c=>items.some(i=>i.code===c)||hist().some(h=>h.code===c);
+const isRet=n=>String(n).startsWith('HOAN_');
+const dupCheck=c=>items.some(i=>i.code===c&&isRet(i.name)===retMode)||hist().some(h=>h.code===c&&isRet(h.name)===retMode);
 const QS={'480':{w:854,h:480,b:1000000},'720':{w:1280,h:720,b:2500000},'1080':{w:1920,h:1080,b:5000000}};
 const Q=()=>QS[LS.get('g_q')]||QS['480'];
 
@@ -322,7 +336,7 @@ async function readCode(){
 async function loop(){
   const c=await readCode();
   if(c){const now=Date.now();if(!(c===lastSeen&&now-lastAt<3000)){lastSeen=c;lastAt=now;onCode(c)}else lastAt=now}
-  setTimeout(loop,250);
+  setTimeout(loop,saver?500:250);
 }
 function onCode(c){
   c=c.trim();if(!c||c===cur||c===blockCode||dupPending)return;
@@ -338,11 +352,12 @@ function initCanvas(){
   cstream=rc.captureStream(30);
   stream.getAudioTracks().forEach(t=>cstream.addTrack(t));
   setInterval(()=>{
+    if(saver&&((fr=(fr+1)|0)&1))return;
     if(v.readyState<2)return;
     if(!rec&&(rc.width!==v.videoWidth||rc.height!==v.videoHeight)){rc.width=v.videoWidth;rc.height=v.videoHeight}
     rctx.drawImage(v,0,0,rc.width,rc.height);
     const d=new Date();
-    const txt=pad(d.getDate())+'/'+pad(d.getMonth()+1)+'/'+d.getFullYear()+' '+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())+(cur?'  |  '+cur:'');
+    const txt=pad(d.getDate())+'/'+pad(d.getMonth()+1)+'/'+d.getFullYear()+' '+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())+(cur?'  |  '+(recRet?'HÀNG HOÀN | ':'')+cur:'');
     const fs=Math.max(14,Math.round(Math.min(rc.width,rc.height)/24));
     rctx.font='bold '+fs+'px sans-serif';rctx.textBaseline='middle';
     const w=rctx.measureText(txt).width,h=fs*1.6,m=fs*.5;
@@ -353,10 +368,11 @@ function initCanvas(){
 function startRec(c,p){
   if(!stream||!window.MediaRecorder){$('hint').textContent='Trình duyệt này không hỗ trợ quay video.';return}
   cur=c;part=p||1;const parts=[],code=c,pn=part;let sz=0,cut=false;
+  if(pn===1)recRet=retMode;const rm=recRet;
   const vb=Q().b;const me=rec=new MediaRecorder(cstream||stream,mime?{mimeType:mime,videoBitsPerSecond:vb}:{videoBitsPerSecond:vb});
   me.ondataavailable=e=>{if(!e.data.size)return;parts.push(e.data);sz+=e.data.size;
     if(tgOn()&&!cut&&sz>=TG_MAX&&rec===me){cut=true;setTimeout(()=>{if(rec===me){stopRec(true);startRec(code,pn+1)}},0)}};
-  me.onstop=()=>finish(code,new Blob(parts,{type:mime||'video/webm'}),pn);
+  me.onstop=()=>finish(code,new Blob(parts,{type:mime||'video/webm'}),pn,rm);
   me.start(1000);t0=Date.now();if(pn===1)ot0=t0;
   $('code').textContent=c;$('stop').disabled=false;$('badge').className='badge rec';
   $('hint').textContent='Đang quay. Quét mã đơn khác hoặc bấm Dừng để kết thúc.';
@@ -364,6 +380,7 @@ function startRec(c,p){
     if(Date.now()-ot0>=MAX_MS){blockCode=cur;stopRec();$('hint').textContent='Đã tự dừng vì đủ 10 phút. Video đã được lưu. Quét mã đơn khác để quay tiếp.';return}
     const s=Math.floor((Date.now()-ot0)/1000);$('badge').textContent='● REC '+pad(Math.floor(s/60))+':'+pad(s%60)},500);
   if(navigator.vibrate)navigator.vibrate(80);sfx('start');
+  if(pn===1)setTimeout(()=>speak((rm?'Hàng hoàn. ':'')+'Đơn '+code.split('').join(' ')),450);
 }
 function stopRec(keepGoing){
   if(!rec)return;clearInterval(timer);if(keepGoing!==true)sfx('end');
@@ -371,9 +388,9 @@ function stopRec(keepGoing){
   rec=null;cur=null;$('stop').disabled=true;$('badge').className='badge';$('badge').textContent='Sẵn sàng quét';
   $('hint').textContent='Đã dừng. Đưa mã đơn tiếp theo vào khung.';
 }
-function finish(code,blob,pn){
+function finish(code,blob,pn,rm){
   if(!blob.size)return;
-  const it={name:safe(code)+(pn>1?'_p'+pn:'')+'_'+stamp()+'.'+ext,blob,saved:false,code,ts:Date.now()};
+  const it={name:(rm?'HOAN_':'')+safe(code)+(pn>1?'_p'+pn:'')+'_'+stamp()+'.'+ext,blob,saved:false,code,ret:!!rm,ts:Date.now()};
   items.unshift(it);render();dbPut(it).then(ok=>{if(ok)it.inDb=true});
   if($('loc').checked)save(it);
   if(driveOn()||tgOn())enqueue(it);
@@ -419,6 +436,23 @@ $('auto').checked=LS.get('g_auto')!=='0';$('loc').checked=LS.get('g_loc')!=='0';
 $('fold').onchange=()=>{LS.set('g_fold',$('fold').value.trim());LS.set('gf_id','')};
 $('auto').onchange=()=>LS.set('g_auto',$('auto').checked?'1':'0');
 $('loc').onchange=()=>LS.set('g_loc',$('loc').checked?'1':'0');
+$('spk').checked=LS.get('g_spk')!=='0';$('spk').onchange=()=>LS.set('g_spk',$('spk').checked?'1':'0');
+function setRet(on){retMode=on;$('retbtn').classList.toggle('on',on);$('retbtn').textContent='↩ Hàng hoàn: '+(on?'BẬT':'TẮT');document.querySelector('.cam').classList.toggle('ret',on);$('hint').textContent=on?'Chế độ HÀNG HOÀN đang bật: video tiếp theo có tiền tố HOAN_ trong tên file.':'Đã tắt chế độ hàng hoàn.'}
+$('retbtn').onclick=()=>setRet(!retMode);
+function setSaver(on){saver=on;LS.set('g_saver',on?'1':'0');$('svbtn').classList.toggle('on',on);$('svbtn').textContent='🔋 Tiết kiệm pin: '+(on?'BẬT':'TẮT');idleT=Date.now();if(!on)$('saver').classList.remove('on')}
+$('svbtn').onclick=()=>setSaver(!saver);
+setSaver(LS.get('g_saver')==='1');
+const wakeSaver=()=>{$('saver').classList.remove('on');idleT=Date.now()};
+$('saver').onclick=wakeSaver;
+['touchstart','pointerdown','keydown'].forEach(e=>addEventListener(e,()=>{idleT=Date.now()},{passive:true,capture:true}));
+setInterval(()=>{
+  if(!saver)return;
+  const sv=$('saver');
+  if(sv.classList.contains('on')){
+    const t=Math.floor((Date.now()-ot0)/1000);
+    $('svtxt').textContent=cur?('● '+(recRet?'HÀNG HOÀN ':'')+cur+'  '+pad(Math.floor(t/60))+':'+pad(t%60)):'Sẵn sàng quét';
+  }else if(Date.now()-idleT>15000&&stream&&!dupPending&&!$('login').classList.contains('on'))sv.classList.add('on');
+},1000);
 $('sfxon').checked=LS.get('g_sfx')!=='0';$('sfxon').onchange=()=>LS.set('g_sfx',$('sfxon').checked?'1':'0');
 async function signIn(){
   setGst('Đang đăng nhập…');$('lerr').textContent='';
