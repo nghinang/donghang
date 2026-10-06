@@ -54,7 +54,7 @@ select{flex:1;min-width:0;padding:12px;border:1px solid var(--bd);border-radius:
 </head>
 <body>
 <div id="saver"><div id="svtxt">Sẵn sàng quét</div><div class="sub">Chạm vào màn hình để mở lại</div></div>
-<div id="dup"><div class="lbox"><div style="font-size:56px">⚠️</div><h1>ĐƠN TRÙNG MÃ</h1><p class="mu" id="dupmsg"></p><button class="big" id="dupgo">Quay thêm video cho đơn này</button><button class="ghost big" id="dupno">Bỏ qua, không quay</button></div></div>
+<div id="dup"><div class="lbox"><div style="font-size:56px">⚠️</div><h1 id="duptitle">ĐƠN TRÙNG MÃ</h1><p class="mu" id="dupmsg"></p><button class="big" id="dupgo">Quay thêm video cho đơn này</button><button class="ghost big" id="dupno">Bỏ qua, không quay</button></div></div>
 <div id="login"><div class="lbox"><div style="font-size:48px">📦</div><h1>Camera đóng hàng</h1><p class="mu">Đăng nhập Google để video đóng hàng được tự động lưu vào Drive của bạn.</p><button class="big" id="lgo">Đăng nhập bằng Google</button><div class="mu err" id="lerr"></div><button class="ghost big" id="lskip">Dùng không cần Drive</button></div></div>
 <main>
 <h1>📦 Camera đóng hàng</h1>
@@ -80,6 +80,12 @@ select{flex:1;min-width:0;padding:12px;border:1px solid var(--bd);border-radius:
   <label class="chk mu"><input type="checkbox" id="spk" checked> Đọc to mã đơn khi quét</label>
   <div class="row"><button class="ghost" id="spktest" style="flex:1">Thử giọng đọc</button></div><div class="mu" id="spkst"></div>
   <label class="chk mu"><input type="checkbox" id="rawmic" checked> Thu âm thô (tắt khử tiếng vọng) để video thu được tiếng đọc. Áp dụng khi bật lại camera.</label>
+</div>
+<div class="card">
+  <div class="mu">Danh sách đơn từ Pancake (đối chiếu mã vận đơn khi quét)</div>
+  <div class="row"><input id="plkey" type="password" placeholder="Mật khẩu danh sách đơn" autocomplete="off"><button id="plgo">Tải</button></div>
+  <label class="chk mu"><input type="checkbox" id="plon"> Cảnh báo khi quét mã không có trong danh sách</label>
+  <div class="mu" id="plst" style="margin-top:6px">Chưa tải danh sách</div>
 </div>
 <div class="card">
   <div class="mu">Telegram (gửi video vào nhóm hoặc kênh riêng)</div>
@@ -109,7 +115,7 @@ const mime=['video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(m=>windo
 const ext=mime.startsWith('video/mp4')?'mp4':'webm';
 // DÁN Client ID (loại Web application) của bạn vào đây:
 const GOOGLE_CLIENT_ID='DÁN_CLIENT_ID_VÀO_ĐÂY.apps.googleusercontent.com';
-const APP_VER='v3 · giọng đọc của máy';
+const APP_VER='v4 · đối chiếu đơn Pancake';
 const MAX_MS=10*60*1000; // tự dừng khi tổng thời gian một đơn quá 10 phút
 const TG_MAX=45*1048576; // bot Telegram nhận tối đa ~50 MB/file, quá mức này app tự chia phần
 let dupOK='',dupPending=null,alarmT=null,blockCode='',gtok='',gexp=0,queue=[],qrun=false;
@@ -308,14 +314,44 @@ function alarmStart(){
   tick();alarmT=setInterval(tick,450);
 }
 function alarmStop(){clearInterval(alarmT);alarmT=null;if(navigator.vibrate)navigator.vibrate(0)}
-function askDup(c){
-  dupPending=c;
-  $('dupmsg').textContent='Mã đơn '+c+' đã có video trước đó. Còi sẽ kêu liên tục cho tới khi bạn chạm một nút bên dưới.';
+let dupKind='dup';const okSet=new Set();
+const ALERTS={
+  dup:['ĐƠN TRÙNG MÃ','Mã {c} đã có video trước đó.','Quay thêm video cho đơn này'],
+  unk:['KHÔNG CÓ TRONG DANH SÁCH','Mã {c} không thuộc các đơn Pancake gần đây (hoặc đơn chưa có mã vận đơn).','Vẫn quay đơn này'],
+  cxl:['ĐƠN ĐÃ HỦY / XÓA','Mã {c} thuộc đơn có trạng thái: {s}.','Vẫn quay đơn này']
+};
+function askAlert(c,kind,st){
+  const a=ALERTS[kind];dupPending=c;dupKind=kind;
+  $('duptitle').textContent=a[0];
+  $('dupmsg').textContent=a[1].replace('{c}',c).replace('{s}',st||'')+' Còi sẽ kêu liên tục cho tới khi bạn chạm một nút bên dưới.';
+  $('dupgo').textContent=a[2];
   $('dup').classList.add('on');alarmStart();wakeSaver();
 }
 function closeDup(){dupPending=null;$('dup').classList.remove('on');alarmStop()}
-$('dupgo').onclick=()=>{const c=dupPending;closeDup();dupOK=c;onCode(c)};
+$('dupgo').onclick=()=>{const c=dupPending,k=dupKind;closeDup();okSet.add(k+':'+c);onCode(c)};
 $('dupno').onclick=()=>{blockCode=dupPending;closeDup()};
+
+/* ---------- Danh sách đơn từ Pancake ---------- */
+let plist=[],plAt=0;
+try{plist=JSON.parse(LS.get('pl_list')||'[]')}catch(e){plist=[]}
+const normT=x=>String(x||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+const plOn=()=>LS.get('g_plon')==='1'&&plist.length>0;
+const plFind=c=>{const n=normT(c);return n?plist.find(o=>normT(o.tracking)===n):null};
+function plStat(m,c){const g=$('plst');if(g){g.textContent=m;g.className='mu '+(c||'')}}
+async function plRefresh(){
+  const key=LS.get('g_plkey');
+  if(!key){plStat('Chưa nhập mật khẩu danh sách đơn','err');return false}
+  plAt=Date.now(); // tránh gọi dồn dập khi lỗi
+  try{
+    const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),8000);
+    const r=await fetch('/api/orders?days=3',{headers:{'x-app-key':key},signal:ctl.signal});clearTimeout(tm);
+    if(r.status===401)throw new Error('sai mật khẩu');
+    if(!r.ok)throw new Error('lỗi máy chủ '+r.status);
+    const j=await r.json();plist=j.orders||[];LS.set('pl_list',JSON.stringify(plist));
+    plStat('Đã tải '+plist.length+' đơn ('+plist.filter(o=>o.tracking).length+' đơn có mã vận đơn) lúc '+new Date().toLocaleTimeString('vi-VN'),'ok');
+    return true;
+  }catch(e){plStat('Không tải được danh sách: '+(e.name==='AbortError'?'quá thời gian chờ':e.message)+(plist.length?' (đang dùng danh sách đã lưu)':''),'err');return false}
+}
 const isRet=n=>String(n).startsWith('HOAN_');
 const dupCheck=c=>items.some(i=>i.code===c&&isRet(i.name)===retMode)||hist().some(h=>h.code===c&&isRet(h.name)===retMode);
 const QS={'480':{w:854,h:480,b:1000000},'720':{w:1280,h:720,b:2500000},'1080':{w:1920,h:1080,b:5000000}};
@@ -362,10 +398,21 @@ async function loop(){
 function onCode(c){
   c=c.trim();if(!c||c===cur||c===blockCode||dupPending)return;
   if(c.toUpperCase()===($('stopc').value||'KETTHUC').toUpperCase()){if(rec)stopRec();return}
-  if(dupOK!==c&&dupCheck(c)){askDup(c);return}
-  dupOK='';blockCode='';
+  // Đối chiếu với danh sách đơn Pancake (bỏ qua ở chế độ hàng hoàn)
+  if(plOn()&&!retMode){
+    const o=plFind(c);
+    if(!o&&!okSet.has('unk:'+c)){
+      if(Date.now()-plAt>15000){plRefresh().then(()=>{plFind(c)?onCode(c):askAlert(c,'unk')});return}
+      askAlert(c,'unk');return;
+    }
+    if(o&&/hủy|xóa/i.test(o.statusName||'')&&!okSet.has('cxl:'+c)){askAlert(c,'cxl',o.statusName);return}
+  }
+  if(!okSet.has('dup:'+c)&&dupCheck(c)){askAlert(c,'dup');return}
+  okSet.delete('dup:'+c);okSet.delete('unk:'+c);okSet.delete('cxl:'+c);blockCode='';
   if(rec)stopRec(true);
   startRec(c);
+  const o2=plOn()&&!retMode?plFind(c):null;
+  if(o2)$('hint').textContent='✔ '+(o2.statusName||'')+' · '+(o2.items||[]).map(i=>i.qty+'× '+i.name).join(', ');
 }
 function initCanvas(){
   const v=$('v');rc=$('pv');rctx=rc.getContext('2d');
@@ -467,6 +514,13 @@ $('spktest').onclick=()=>{
   speak('Đơn một hai ba bốn','1 2 3 4');
   setTimeout(()=>{if(!spkStarted)spkInfo('Máy không phát tiếng. Kiểm tra mục Chuyển văn bản thành giọng nói trong Cài đặt Android và âm lượng đa phương tiện.','err')},2500);
 };
+$('plkey').value=LS.get('g_plkey');$('plon').checked=LS.get('g_plon')==='1';
+$('plkey').onchange=()=>LS.set('g_plkey',$('plkey').value.trim());
+$('plon').onchange=()=>LS.set('g_plon',$('plon').checked?'1':'0');
+$('plgo').onclick=()=>{LS.set('g_plkey',$('plkey').value.trim());plRefresh()};
+if(plist.length)plStat('Đang dùng danh sách đã lưu: '+plist.length+' đơn','');
+if(LS.get('g_plkey'))plRefresh();
+setInterval(()=>{if(LS.get('g_plkey'))plRefresh()},300000);
 $('ver').textContent=APP_VER;
 function setRet(on){retMode=on;$('retbtn').classList.toggle('on',on);$('retbtn').textContent='↩ Hàng hoàn: '+(on?'BẬT':'TẮT');document.querySelector('.cam').classList.toggle('ret',on);$('hint').textContent=on?'Chế độ HÀNG HOÀN đang bật: video tiếp theo có tiền tố HOAN_ trong tên file.':'Đã tắt chế độ hàng hoàn.'}
 $('retbtn').onclick=()=>setRet(!retMode);
